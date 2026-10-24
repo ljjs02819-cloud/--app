@@ -13,8 +13,10 @@ jobs:
         run: |
           mkdir -p /tmp/src
           unzip -o -q kefu-src.zip -d /tmp/src
+          rm -rf app build.gradle settings.gradle gradle.properties gradle
           cp -a /tmp/src/. .
           rm -f kefu-src.zip
+          ls -1
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -28,26 +30,32 @@ jobs:
         run: |
           yes | sdkmanager --licenses > /dev/null 2>&1 || true
           sdkmanager 'platforms;android-34' 'build-tools;34.0.0' 2>&1 | tail -2
-          cd /tmp && curl -sSL -o g.zip https://services.gradle.org/distributions/gradle-8.6-bin.zip && unzip -q g.zip -d /opt
-          cd $GITHUB_WORKSPACE
+          if [ ! -x /opt/gradle-8.6/bin/gradle ]; then
+            curl -sSL -o /tmp/g.zip https://services.gradle.org/distributions/gradle-8.6-bin.zip
+            unzip -q /tmp/g.zip -d /opt
+          fi
           echo '## Gradle result' >> $GITHUB_STEP_SUMMARY
-          /opt/gradle-8.6/bin/gradle assembleDebug --no-daemon > out.txt 2>&1
-          echo "exit=$?" >> $GITHUB_STEP_SUMMARY
+          /opt/gradle-8.6/bin/gradle assembleDebug --no-daemon --stacktrace > out.txt 2>&1
+          EX=$?
+          echo "exit=$EX" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-          grep -E 'error:|FAILURE|What went wrong|> |Could not' out.txt | head -40 >> $GITHUB_STEP_SUMMARY
+          grep -E 'error:|FAILURE|What went wrong|Could not|Duplicate' out.txt | head -40 >> $GITHUB_STEP_SUMMARY || true
           echo '```' >> $GITHUB_STEP_SUMMARY
-          ls -l app/build/outputs/apk/debug/ 2>&1 | head >> $GITHUB_STEP_SUMMARY
-      - name: Save log
+          ls -l app/build/outputs/apk/debug/ 2>&1 | head >> $GITHUB_STEP_SUMMARY || true
+          exit $EX
+      - name: Report log
         if: always()
         run: |
-          cp out.txt build-log.txt || true
-          git config user.email a@b.c && git config user.name bot
-          git add -f build-log.txt && git commit -m 'log' || true
-          git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git HEAD:main || true
+          tail -60 out.txt || true
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: build-output
-          path: |
-            out.txt
-            build-log.txt
+          path: out.txt
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kefu-apk
+          path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: warn
