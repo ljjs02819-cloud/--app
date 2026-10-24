@@ -16,7 +16,6 @@ jobs:
           unzip -o -q kefu-src.zip -d /tmp/src
           cp -a /tmp/src/. .
           rm -f kefu-src.zip
-          ls -R app/src/main | head -60
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
@@ -25,7 +24,7 @@ jobs:
       - name: Prepare Gradle
         run: |
           yes | sdkmanager --licenses > /dev/null 2>&1 || true
-          sdkmanager 'platforms;android-34' 'build-tools;34.0.0' 2>&1 | tail -5 || true
+          sdkmanager 'platforms;android-34' 'build-tools;34.0.0' 2>&1 | tail -3 || true
           cd /tmp
           curl -sSL -o gradle.zip https://services.gradle.org/distributions/gradle-8.6-bin.zip
           unzip -q gradle.zip -d /opt
@@ -35,19 +34,17 @@ jobs:
           ANDROID_HOME: /usr/local/lib/android/sdk
           ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
         run: |
-          set +e
           gradle assembleDebug --no-daemon --stacktrace > /tmp/build.log 2>&1
           RC=$?
           if [ $RC -ne 0 ]; then
-            echo '===== GRADLE TAIL ====='
-            tail -80 /tmp/build.log
-            echo '===== FIRST ERROR ====='
-            grep -m3 -E 'error:|FAILURE:|Could not|What went wrong' /tmp/build.log || true
-            MSG=$(grep -m1 -E 'error:|Could not resolve|What went wrong|FAILURE:' /tmp/build.log | cut -c1-120)
-            echo "::error title=Gradle failed::${MSG}"
+            sed -n '/FAILURE: Build failed/,/BUILD FAILED/p' /tmp/build.log | head -50 > /tmp/block.txt
+            while IFS= read -r line; do
+              SAFE=$(printf '%s' "$line" | sed 's/%/%25/g; s/\r//g')
+              echo "::error title=G::${SAFE}"
+            done < /tmp/block.txt
+            grep -n 'Caused by' /tmp/build.log | head -10
             exit 1
           fi
-          ls -l app/build/outputs/apk/debug/
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
