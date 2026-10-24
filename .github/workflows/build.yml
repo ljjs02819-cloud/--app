@@ -3,6 +3,8 @@ on:
   push:
     branches: [ main ]
   workflow_dispatch:
+permissions:
+  contents: write
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -35,18 +37,19 @@ jobs:
         env:
           ANDROID_HOME: /usr/local/lib/android/sdk
           ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
-        run: gradle assembleDebug --no-daemon --stacktrace > /tmp/build.log 2>&1 ; echo rc=$? ; tail -c 60000 /tmp/build.log > /tmp/short.log
+        run: |
+          gradle assembleDebug --no-daemon --stacktrace > /tmp/build.log 2>&1
+          echo "rc=$?"
+          tail -c 40000 /tmp/build.log > /tmp/short.log
       - name: Publish log on failure
         if: steps.build.outcome == 'failure'
         run: |
-          B64=$(base64 -w0 /tmp/short.log)
-          SHA=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" ${{ github.api_url }}/repos/${{ github.repository }}/contents/build-log.txt | python3 -c 'import sys,json;print(json.load(sys.stdin).get("sha",""))' 2>/dev/null)
-          if [ -z "$SHA" ]; then
-            python3 -c "import json,os;open('/tmp/p.json','w').write(json.dumps({'message':'build log','content':os.environ['B64'],'branch':'main'}))"
-          else
-            python3 -c "import json,os;open('/tmp/p.json','w').write(json.dumps({'message':'build log','content':os.environ['B64'],'branch':'main','sha':os.environ['SHA']}))"
-          fi
-          curl -s -X PUT -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" -H "Content-Type: application/json" -d @/tmp/p.json ${{ github.api_url }}/repos/${{ github.repository }}/contents/build-log.txt
+          cp /tmp/short.log ./build-log.txt
+          git config user.email a@b.c
+          git config user.name bot
+          git add -f build-log.txt
+          git commit -m 'build log' || true
+          git push origin HEAD:main || true
           exit 1
       - name: Upload APK
         if: steps.build.outcome == 'success'
