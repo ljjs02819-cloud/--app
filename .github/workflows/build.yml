@@ -3,58 +3,51 @@ on:
   push:
     branches: [ main ]
   workflow_dispatch:
-permissions:
-  contents: write
 jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Unpack source
+      - uses: actions/checkout@v4
+      - name: Unpack
         run: |
           mkdir -p /tmp/src
           unzip -o -q kefu-src.zip -d /tmp/src
           cp -a /tmp/src/. .
           rm -f kefu-src.zip
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
+      - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
-      - name: Prepare Gradle
-        run: |
-          yes | sdkmanager --licenses > /dev/null 2>&1 || true
-          sdkmanager 'platforms;android-34' 'build-tools;34.0.0' 2>&1 | tail -3 || true
-          cd /tmp
-          curl -sSL -o gradle.zip https://services.gradle.org/distributions/gradle-8.6-bin.zip
-          unzip -q gradle.zip -d /opt
-          echo /opt/gradle-8.6/bin >> $GITHUB_PATH
-      - name: Build debug APK
-        id: build
+      - name: Build
+        id: b
         continue-on-error: true
         env:
           ANDROID_HOME: /usr/local/lib/android/sdk
           ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
         run: |
-          gradle assembleDebug --no-daemon --stacktrace > /tmp/build.log 2>&1
-          echo "rc=$?"
-          tail -c 40000 /tmp/build.log > /tmp/short.log
-      - name: Publish log on failure
-        if: steps.build.outcome == 'failure'
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          sdkmanager 'platforms;android-34' 'build-tools;34.0.0' 2>&1 | tail -2
+          cd /tmp && curl -sSL -o g.zip https://services.gradle.org/distributions/gradle-8.6-bin.zip && unzip -q g.zip -d /opt
+          cd $GITHUB_WORKSPACE
+          echo '## Gradle result' >> $GITHUB_STEP_SUMMARY
+          /opt/gradle-8.6/bin/gradle assembleDebug --no-daemon > out.txt 2>&1
+          echo "exit=$?" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          grep -E 'error:|FAILURE|What went wrong|> |Could not' out.txt | head -40 >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          ls -l app/build/outputs/apk/debug/ 2>&1 | head >> $GITHUB_STEP_SUMMARY
+      - name: Save log
+        if: always()
         run: |
-          cp /tmp/short.log ./build-log.txt
-          git config user.email a@b.c
-          git config user.name bot
-          git add -f build-log.txt
-          git commit -m 'build log' || true
-          git push origin HEAD:main || true
-          exit 1
-      - name: Upload APK
-        if: steps.build.outcome == 'success'
-        uses: actions/upload-artifact@v4
+          cp out.txt build-log.txt || true
+          git config user.email a@b.c && git config user.name bot
+          git add -f build-log.txt && git commit -m 'log' || true
+          git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git HEAD:main || true
+      - uses: actions/upload-artifact@v4
         with:
-          name: kefu-apk
-          path: app/build/outputs/apk/debug/*.apk
-          if-no-files-found: error
+          name: build-output
+          path: |
+            out.txt
+            build-log.txt
+          if-no-files-found: warn
