@@ -16,29 +16,38 @@ jobs:
           unzip -o -q kefu-src.zip -d /tmp/src
           cp -a /tmp/src/. .
           rm -f kefu-src.zip
-          echo '--- tree ---'
-          ls -R app/src | head -50
+          ls -R app/src/main | head -60
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
-      - name: Prepare SDK and Gradle
+      - name: Prepare Gradle
         run: |
-          echo 'ANDROID_HOME='$ANDROID_HOME
-          ls $ANDROID_HOME || true
           yes | sdkmanager --licenses > /dev/null 2>&1 || true
-          sdkmanager 'platforms;android-34' 'build-tools;34.0.0' > /dev/null 2>&1 || true
+          sdkmanager 'platforms;android-34' 'build-tools;34.0.0' 2>&1 | tail -5 || true
           cd /tmp
           curl -sSL -o gradle.zip https://services.gradle.org/distributions/gradle-8.6-bin.zip
           unzip -q gradle.zip -d /opt
           echo /opt/gradle-8.6/bin >> $GITHUB_PATH
-          /opt/gradle-8.6/bin/gradle --version
       - name: Build debug APK
         env:
           ANDROID_HOME: /usr/local/lib/android/sdk
           ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
-        run: gradle assembleDebug --no-daemon --stacktrace
+        run: |
+          set +e
+          gradle assembleDebug --no-daemon --stacktrace > /tmp/build.log 2>&1
+          RC=$?
+          if [ $RC -ne 0 ]; then
+            echo '===== GRADLE TAIL ====='
+            tail -80 /tmp/build.log
+            echo '===== FIRST ERROR ====='
+            grep -m3 -E 'error:|FAILURE:|Could not|What went wrong' /tmp/build.log || true
+            MSG=$(grep -m1 -E 'error:|Could not resolve|What went wrong|FAILURE:' /tmp/build.log | cut -c1-120)
+            echo "::error title=Gradle failed::${MSG}"
+            exit 1
+          fi
+          ls -l app/build/outputs/apk/debug/
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
