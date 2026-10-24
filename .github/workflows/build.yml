@@ -29,23 +29,27 @@ jobs:
           curl -sSL -o gradle.zip https://services.gradle.org/distributions/gradle-8.6-bin.zip
           unzip -q gradle.zip -d /opt
           echo /opt/gradle-8.6/bin >> $GITHUB_PATH
-          echo SDK=$ANDROID_HOME
-          ls $ANDROID_HOME
       - name: Build debug APK
+        id: build
+        continue-on-error: true
         env:
           ANDROID_HOME: /usr/local/lib/android/sdk
           ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+        run: gradle assembleDebug --no-daemon --stacktrace > /tmp/build.log 2>&1 ; echo rc=$? ; tail -c 60000 /tmp/build.log > /tmp/short.log
+      - name: Publish log on failure
+        if: steps.build.outcome == 'failure'
         run: |
-          gradle assembleDebug --no-daemon 2>&1 | tee /tmp/build.log
-          RC=${PIPESTATUS[0]}
-          if [ $RC -ne 0 ]; then
-            echo '######LAST40######'
-            tail -40 /tmp/build.log
-            echo '######FIRST30######'
-            head -30 /tmp/build.log
-            exit 1
+          B64=$(base64 -w0 /tmp/short.log)
+          SHA=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" ${{ github.api_url }}/repos/${{ github.repository }}/contents/build-log.txt | python3 -c 'import sys,json;print(json.load(sys.stdin).get("sha",""))' 2>/dev/null)
+          if [ -z "$SHA" ]; then
+            python3 -c "import json,os;open('/tmp/p.json','w').write(json.dumps({'message':'build log','content':os.environ['B64'],'branch':'main'}))"
+          else
+            python3 -c "import json,os;open('/tmp/p.json','w').write(json.dumps({'message':'build log','content':os.environ['B64'],'branch':'main','sha':os.environ['SHA']}))"
           fi
+          curl -s -X PUT -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" -H "Content-Type: application/json" -d @/tmp/p.json ${{ github.api_url }}/repos/${{ github.repository }}/contents/build-log.txt
+          exit 1
       - name: Upload APK
+        if: steps.build.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: kefu-apk
